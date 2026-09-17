@@ -8,7 +8,7 @@
                   >
                     <strong>{item.name}</strong>
                     <small>
-                      {item.baseBranch} · {liveBayCount(itemMap?.lanes || [], item.rootPath)} 概树 · {item.tasks.filter((entry) => entry.status === "active").length} 进行中
+                      {item.baseBranch} · {liveBayCount(itemMap?.lanes || [], item.rootPath)} 棵树 · {item.tasks.filter((entry) => entry.status === "active").length} 进行中
                     </small>
                   </button>
                 );
@@ -58,8 +58,7 @@
                     </div>
                   ) : null}
                   <button
-                    type="button"
-                    className={composeOpen ? "ghost on" : "ghost"}
+                    type="button" className={composeOpen ? "ghost on" : "ghost"}
                     onClick={() => {
                       setComposeOpen((value) => !value);
                       setView("lanes");
