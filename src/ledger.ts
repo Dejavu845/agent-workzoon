@@ -31,7 +31,7 @@ export function appendLedger(
 }
 
 export function readLedger(project: Project): string {
-  const path = ledgerPath(path);
+  const path = ledgerPath(project);
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
