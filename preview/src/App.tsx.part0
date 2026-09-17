@@ -1,0 +1,654 @@
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  setMotionPreference,
+  useChromeMotion,
+  useFocusReceive,
+  useForgeParallax,
+  useGlassSpecular,
+  usePane,
+  usePop,
+  useRise,
+  useScene,
+} from "./motion";
+import {
+  api,
+  type AgentAction,
+  type AppSettings,
+  type AppSkin,
+  type BlastReport,
+  type Consent,
+  type ConsentRequest,
+  type Drift,
+  type Holdings,
+  type Policy,
+  type PolicyPreset,
+  type Project,
+  type RepoLane,
+  type Snapshot,
+  type SourceEntry,
+  type Task,
+  type HygieneKind,
+  type Occupancy,
+  type ProcessGraph,
+  type ProcessStep,
+  type WikiLint,
+  type WikiPage,
+} from "./api";
+import { onDutySatellites, PROCESS_STEPS, processStripView, stripLabel } from "./graph";
+import { bayPath, formatIdle, groupLanes, laneOf, liveBayCount, resolveSelection, shorten } from "./lanes";
+import { WorktreeDeck } from "./WorktreeDeck";
+import { openRecipe } from "./open";
+import { resolveWikiLink } from "./wiki";
+import { WikiPane } from "./WikiPane";
+import { LoopRail } from "./LoopRail";
+import { isTypingTarget, shortcutFor } from "./keys";
+import { loopForLane, loopFromOccupancy, nextHandIntent, type LoopStep } from "./loop";
+
+const POLICY_ACTIONS: { id: AgentAction; label: string; destructive: boolean; group: "任务" | "分支" | "宪章" | "百科" }[] = [
+  { id: "createTask", label: "开新任务", destructive: false, group: "任务" },
+  { id: "markDone", label: "标记任务完成", destructive: false, group: "任务" },
+  { id: "escalateFrozen", label: "给自己的任务开「动冻层」", destructive: true, group: "任务" },
+  { id: "createBranch", label: "为任务建分支和 worktree", destructive: false, group: "分支" },
+  { id: "plantBranch", label: "检出已有分支为 worktree", destructive: false, group: "分支" },
+  { id: "archiveWorktree", label: "归档干净的 worktree（留分支）", destructive: false, group: "分支" },
+  { id: "archiveWorktreeForce", label: "丢弃未提交改动并归档", destructive: true, group: "分支" },
+  { id: "deleteBranch", label: "删除分支", destructive: true, group: "分支" },
+  { id: "editCharter", label: "修改宪章", destructive: true, group: "宪章" },
+  { id: "ingestRaw", label: "收入原文到 raw/", destructive: false, group: "百科" },
+  { id: "lintFix", label: "lint 自动补 index", destructive: false, group: "百科" },
+];
+const POLICY_GROUPS: Array<(typeof POLICY_ACTIONS)[number]["group"]> = ["任务", "分支", "宪章", "百科"];
+const TASK_STATUSES: Task["status"][] = ["backlog", "active", "review", "done", "blocked"];
+
+const CONSENT_LABEL: Record<Consent, string> = { never: "禁止", ask: "需确认", allow: "允许" };
+type Tab = "task" | "holdings" | "charter" | "handoff" | "wiki" | "blast";
+type Filter = "all" | "active" | "review" | "done" | "hygiene" | "undeclared";
+type View = "holdings" | "forest" | "lanes";
+
+const STATUS: Record<Task["status"], string> = {
+  backlog: "待开始",
+  active: "进行中",
+  review: "待审",
+  done: "已完成",
+  blocked: "受阻",
+};
+
+const VIEW_LABEL: Record<View, string> = {
+  holdings: "掌控",
+  forest: "全部分支",
+  lanes: "任务车道",
+};
+const TAB_LABEL: Record<Tab, string> = {
+  holdings: "清单",
+  task: "对照",
+  charter: "宪章",
+  handoff: "交接",
+  blast: "范围",
+  wiki: "百科",
+};
+const TAB_HINT: Partial<Record<Tab, string>> = {
+  holdings: "0",
+  task: "1",
+  handoff: "2",
+  blast: "3",
+  wiki: "/ 或 4",
+};
+const FILTER_LABEL: Record<Filter, string> = {
+  all: "全部",
+  active: "在场",
+  review: "待审",
+  done: "已完成",
+  hygiene: "待清理",
+  undeclared: "清单外",
+};
+const FILTER_TITLE: Record<Filter, string> = {
+  all: "这一页的全部行",
+  active: "车道：进行中和待开始。森林：已检出，或进行中/待开始的任务。",
+  review: "状态为待审的任务；森林只显示挂了待审任务的分支",
+  done: "状态为已完成的任务；森林只显示挂了已完成任务的分支",
+  hygiene: "merged / 14 天无动 / 缺交接",
+  undeclared: "仓库里有、清单里没有。你来处理，不会自动删。",
+};
+
+export function App() {
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [groupId, setGroupId] = useState("studio");
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [laneId, setLaneId] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("task");
+  const [view, setView] = useState<View>("holdings");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [rootDraft, setRootDraft] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [titleDraft, setTitleDraft] = useState("");
+  const [intentDraft, setIntentDraft] = useState<"feat" | "spike" | "hotfix">("feat");
+  const [baseDraft, setBaseDraft] = useState("");
+  const [allowDraft, setAllowDraft] = useState("app/**");
+  const [frozenDraft, setFrozenDraft] = useState(false);
+  const [reasonDraft, setReasonDraft] = useState("");
+  const [decisionDraft, setDecisionDraft] = useState("");
+  const [nextDraft, setNextDraft] = useState("");
+  const [handoffText, setHandoffText] = useState("");
+  const [promptText, setPromptText] = useState("");
+  const [blast, setBlast] = useState<BlastReport | null>(null);
+  const [pages, setPages] = useState<WikiPage[]>([]);
+  const [wikiCatalog, setWikiCatalog] = useState<WikiPage[]>([]);
+  const [wikiPage, setWikiPage] = useState<WikiPage | null>(null);
+  const [wikiFocus, setWikiFocus] = useState(0);
+  const [lint, setLint] = useState<WikiLint | null>(null);
+  const [query, setQuery] = useState("");
+  const [ingestTitle, setIngestTitle] = useState("");
+  const [ingestBody, setIngestBody] = useState("");
+  const [files, setFiles] = useState<SourceEntry[]>([]);
+  const [browsePath, setBrowsePath] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [deleteFor, setDeleteFor] = useState<string | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [confirmBranch, setConfirmBranch] = useState("");
+  const [graph, setGraph] = useState<ProcessGraph | null>(null);
+  const [stripFocus, setStripFocus] = useState<ProcessStep>("repo");
+  const [focusNonce, setFocusNonce] = useState(0);
+  const [pulseFocus, setPulseFocus] = useState(0);
+  const copyTimer = useRef(0);
+  const goNextHandRef = useRef<() => void>(() => {});
+  const shellRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const paneRef = usePane<HTMLDivElement>(tab);
+  const sceneRef = useScene<HTMLDivElement>(view);
+  const toastRef = usePop<HTMLDivElement>(Boolean(copied || error || notice));
+  const bumpFocus = useCallback(() => setFocusNonce((n) => n + 1), []);
+
+  const project = useMemo(
+    () => snap?.projects.find((item) => item.id === projectId) || snap?.projects[0] || null,
+    [snap, projectId],
+  );
+  const map = useMemo(
+    () => snap?.maps.find((item) => item.rootPath === project?.rootPath) || null,
+    [snap, project],
+  );
+  const holdings = useMemo(
+    () => snap?.holdings?.find((item) => item.rootPath === project?.rootPath) || null,
+    [snap, project],
+  );
+  const visibleTasks = useMemo(() => {
+    const list = project?.tasks || [];
+    if (filter === "all") return list;
+    if (filter === "hygiene") {
+      const dirty = new Set(
+        (map?.lanes || []).filter((lane) => lane.hygiene?.length).map((lane) => lane.taskId).filter(Boolean),
+      );
+      return list.filter((item) => dirty.has(item.id));
+    }
+    if (filter === "undeclared") return [];
+    if (filter === "active") return list.filter((item) => item.status === "active" || item.status === "backlog");
+    return list.filter((item) => item.status === filter);
+  }, [project, filter, map]);
+  const forestLanes = useMemo(() => {
+    const list = map?.lanes || [];
+    if (filter === "all") return list;
+    if (filter === "hygiene") return list.filter((item) => (item.hygiene?.length || 0) > 0);
+    if (filter === "undeclared") return list.filter((item) => item.undeclared);
+    if (filter === "active") {
+      return list.filter((item) => item.worktreePath || item.taskStatus === "active" || item.taskStatus === "backlog");
+    }
+    return list.filter((item) => item.taskStatus === filter);
+  }, [map, filter]);
+  const { lane: selectedLane, task } = useMemo(
+    () =>
+      resolveSelection({
+        view,
+        lanes: forestLanes,
+        tasks: project?.tasks || [],
+        laneId,
+        taskId,
+      }),
+    [view, forestLanes, project?.tasks, laneId, taskId],
+  );
+  const groupedForest = useMemo(
+    () => groupLanes(forestLanes, project?.baseBranch || "main"),
+    [forestLanes, project?.baseBranch],
+  );
+  const pendingCount = useMemo(
+    () => (snap?.requests || []).filter((item) => item.rootPath === project?.rootPath).length,
+    [snap, project],
+  );
+  const drift = useMemo(
+    () => (snap?.drift || []).find((d) => d.rootPath === project?.rootPath)?.items || [],
+    [snap, project],
+  );
+  const occupancyRows = useMemo(
+    () => (snap?.occupancy || []).find((item) => item.rootPath === project?.rootPath)?.rows || [],
+    [snap, project],
+  );
+  const strip = useMemo(
+    () =>
+      graph
+        ? processStripView(graph, {
+            branch: selectedLane?.branch,
+            worktreePath: selectedLane?.worktreePath || undefined,
+          })
+        : null,
+    [graph, selectedLane],
+  );
+  const dutyRows = useMemo(() => onDutySatellites(occupancyRows), [occupancyRows]);
+  const selectedOccupancy = useMemo(
+    () => (task ? occupancyRows.find((row) => row.taskId === task.id) : undefined),
+    [occupancyRows, task],
+  );
+  const loop = useMemo(() => {
+    if (!task) return null;
+    const planted = Boolean(
+      selectedOccupancy?.evidence.find((cell) => cell.id === "tree")?.lit ||
+        (selectedLane?.worktreePath && selectedLane.worktreePath !== project?.rootPath),
+    );
+    return loopFromOccupancy(task.status, selectedOccupancy, planted);
+  }, [task, selectedOccupancy, selectedLane, project?.rootPath]);
+  const uncheckedCount = useMemo(
+    () => (map?.lanes || []).filter((item) => !item.worktreePath).length,
+    [map],
+  );
+  const taskStats = useMemo(() => {
+    const counts: Record<Task["status"], number> = { backlog: 0, active: 0, review: 0, done: 0, blocked: 0 };
+    for (const item of project?.tasks || []) counts[item.status] += 1;
+    return counts;
+  }, [project]);
+
+  const grouped = useMemo(() => {
+    const groups = snap?.catalog.groups || [];
+    return groups
+      .slice()
+      .sort((a, b) => a.sort - b.sort)
+      .map((group) => ({
+        ...group,
+        projects: (snap?.projects || []).filter((item) => (item.groupId || "studio") === group.id),
+      }));
+  }, [snap]);
+
+  const listRef = useRise<HTMLUListElement>([view, filter, project?.id, forestLanes.length, visibleTasks.length]);
+  const boardRef = useRise<HTMLDivElement>([view, project?.id, holdings?.artifacts.length]);
+  useChromeMotion(shellRef, [snap?.projects.length, view, tab, forestLanes.length]);
+  useForgeParallax(shellRef, contentRef, appSettings?.skin === "forge" && appSettings?.motion !== "off");
+  useGlassSpecular(shellRef, appSettings?.motion !== "off");
+  useFocusReceive(inspectorRef, focusNonce);
+
+  useEffect(() => {
+    setMotionPreference(appSettings?.motion || "system");
+  }, [appSettings?.motion]);
+
+  const refresh = useCallback(async (preferredProject?: string, preferredTask?: string) => {
+    const next = await api.snapshot();
+    setSnap(next);
+    if (next.catalog.settings) setAppSettings(next.catalog.settings);
+    else {
+      try {
+        setAppSettings(await api.settings());
+      } catch {
+        setAppSettings(null);
+      }
+    }
+    const chosen = next.projects.find((item) => item.id === (preferredProject || projectId)) || next.projects[0];
+    if (chosen) {
+      setProjectId(chosen.id);
+      const nextTask = chosen.tasks.find((item) => item.id === (preferredTask || taskId)) || chosen.tasks[0];
+      setTaskId(nextTask?.id || null);
+      const nextMap = next.maps.find((item) => item.rootPath === chosen.rootPath);
+      const nextLane =
+        nextMap?.lanes.find((item) => item.taskId === nextTask?.id) ||
+        nextMap?.lanes.find((item) => item.id === laneId) ||
+        nextMap?.lanes[0];
+      setLaneId(nextLane?.id || null);
+    }
+  }, [projectId, taskId, laneId]);
+
+  useEffect(() => {
+    if (!project?.rootPath) {
+      setGraph(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .graph(project.rootPath)
+      .then((next) => {
+        if (!cancelled) setGraph(next);
+      })
+      .catch(() => {
+        if (!cancelled) setGraph(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.rootPath, snap]);
+
+  useEffect(() => {
+    refresh().catch((err) => setError(String(err.message || err)));
+  }, []);
+
+  useEffect(() => {
+    if (!project || tab !== "wiki") return;
+    const handle = window.setTimeout(() => {
+      api.wiki(project.rootPath, query).then(setPages).catch(() => setPages([]));
+    }, 160);
+    return () => window.clearTimeout(handle);
+  }, [project?.rootPath, query, tab]);
+
+  useEffect(() => {
+    if (!project || tab !== "wiki") return;
+    api.wiki(project.rootPath, "").then(setWikiCatalog).catch(() => setWikiCatalog([]));
+  }, [project?.rootPath, tab]);
+
+  useEffect(() => {
+    if (!project || !task) {
+      setHandoffText("");
+      setPromptText("");
+      return;
+    }
+    let cancelled = false;
+    setDecisionDraft("");
+    setNextDraft("");
+    api
+      .readHandoff(project.rootPath, task.id)
+      .then((item) => {
+        if (cancelled) return;
+        setHandoffText(item.markdown);
+        setPromptText(item.prompt || "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHandoffText("");
+          setPromptText("");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.rootPath, task?.id]);
+
+  useEffect(() => {
+    const root = selectedLane?.worktreePath || project?.rootPath;
+    if (!root || !project) return;
+    const target = browsePath && browsePath.startsWith(root) ? browsePath : root;
+    api.files(project.rootPath, target).then(setFiles).catch(() => setFiles([]));
+  }, [project?.rootPath, selectedLane?.worktreePath, browsePath]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!project || settingsOpen || registerOpen) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const typing = isTypingTarget(event.target);
+      const chord = shortcutFor(event.key, typing);
+      if (chord?.kind === "wiki-search") {
+        event.preventDefault();
+        setTab("wiki");
+        setWikiFocus((n) => n + 1);
+        return;
+      }
+      if (chord?.kind === "tab") {
+        event.preventDefault();
+        setTab(chord.tab);
+        if (chord.tab === "wiki") setWikiFocus((n) => n + 1);
+        return;
+      }
+      if (chord?.kind === "view") {
+        event.preventDefault();
+        setView(chord.view);
+        return;
+      }
+      if (chord?.kind === "next-hand") {
+        event.preventDefault();
+        goNextHandRef.current();
+        return;
+      }
+      if (typing) return;
+      if (tab === "wiki" && (event.key === "j" || event.key === "k" || event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        return;
+      }
+      const rows = view === "lanes" ? visibleTasks : forestLanes;
+      if (event.key === "j" || event.key === "ArrowDown" || event.key === "k" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const currentId = view === "forest" ? selectedLane?.id : task?.id;
+        const index = rows.findIndex((item) => ("id" in item ? item.id : "") === currentId);
+        const nextIndex = event.key === "j" || event.key === "ArrowDown"
+          ? Math.min(rows.length - 1, index + 1)
+          : Math.max(0, index - 1);
+        const next = rows[nextIndex];
+        if (!next) return;
+        if (view !== "lanes") {
+          const lane = next as RepoLane;
+          setLaneId(lane.id);
+          setTaskId(lane.taskId || null);
+        } else {
+          const nextTask = next as Task;
+          setTaskId(nextTask.id);
+          const match = map?.lanes.find((item) => item.taskId === nextTask.id);
+          setLaneId(match?.id || null);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [project, view, tab, forestLanes, visibleTasks, selectedLane, task, map, settingsOpen, registerOpen]);
+
+  async function run(action: () => Promise<void>) {
+    if (busy) return;
+    setError("");
+    setBusy(true);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copy(label: string, value: string) {
+    if (!value) return;
+    void navigator.clipboard.writeText(value);
+    setNotice("");
+    setCopied(label);
+    window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopied(""), 2200);
+  }
+
+  function hint(message: string) {
+    setCopied("");
+    setNotice(message);
+    window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setNotice(""), 2800);
+  }
+
+  function goNextHand() {
+    if (!project) return;
+    const intent = nextHandIntent(loop);
+    if (intent === "tree" && task) {
+      setTab("task");
+      run(async () => {
+        const opened = await api.openTree(project.rootPath, task.id);
+        await refresh(project.id, task.id);
+        const recipe = openRecipe(appSettings?.openIn, opened.worktree.path);
+        copy(`${recipe.label}，下一步登记心跳`, recipe.command);
+      });
+      return;
+    }
+    if (intent === "tree" && selectedLane && !selectedLane.worktreePath) {
+      setTab("task");
+      run(async () => {
+        const planted = await api.plant(project.rootPath, selectedLane.branch);
+        setBrowsePath(planted.path);
+        await refresh(project.id, task?.id);
+        const recipe = openRecipe(appSettings?.openIn, planted.path);
+        copy(`${recipe.label}，下一步登记心跳`, recipe.command);
+      });
+      return;
+    }
+    if (intent === "pulse") {
+      setTab("task");
+      setPulseFocus((n) => n + 1);
+      return;
+    }
+    if (intent === "handoff" || intent === "done") {
+      setTab("handoff");
+      return;
+    }
+    if (intent === "wiki") {
+      setTab("wiki");
+      setWikiFocus((n) => n + 1);
+    }
+  }
+  goNextHandRef.current = goNextHand;
+
+  const composeBar = project ? (
+    <div className="compose">
+      <input
+        value={titleDraft}
+        onChange={(event) => setTitleDraft(event.target.value)}
+        placeholder="功能名，例如：修播放器进度条"
+      />
+      <input
+        value={allowDraft}
+        onChange={(event) => setAllowDraft(event.target.value)}
+        placeholder="允许路径 app/**"
+      />
+      <label className="toggle-field">
+        <span>动冻层</span>
+        <button
+          type="button"
+          role="switch"
+          className={frozenDraft ? "toggle on" : "toggle"}
+          aria-checked={frozenDraft}
+          onClick={() => setFrozenDraft((value) => !value)}
+        />
+      </label>
+      {frozenDraft ? (
+        <input
+          className="reason"
+          value={reasonDraft}
+          onChange={(event) => setReasonDraft(event.target.value)}
+          placeholder="开冻层理由（至少 4 个字）"
+        />
+      ) : null}
+      <button
+        className="primary"
+        disabled={busy}
+        onClick={() =>
+          run(async () => {
+            if (!titleDraft.trim()) throw new Error("先写功能名");
+            if (frozenDraft && reasonDraft.trim().replace(/\s+/g, " ").length < 4) {
+              throw new Error("开冻层必须写理由（至少 4 个字）");
+            }
+            const created = await api.createTask(
+              project.rootPath,
+              titleDraft.trim(),
+              allowDraft.split(",").map((part) => part.trim()).filter(Boolean),
+              frozenDraft,
+              frozenDraft ? reasonDraft : undefined,
+              { intent: intentDraft, baseBranch: (baseDraft || project.baseBranch) },
+            );
+            setTitleDraft("");
+            setReasonDraft("");
+            setFrozenDraft(false);
+            setIntentDraft("feat");
+            setBaseDraft("");
+            await refresh(project.id, created.task.id);
+            setView("lanes");
+            setTab("task");
+            setComposeOpen(false);
+            hint("下一步：对照里创建 worktree");
+          })
+        }
+      >
+        新任务
+      </button>
+      <div className="compose-meta">
+        <div className="seg" role="radiogroup" aria-label="意图">
+          {([
+            ["feat", "功能"],
+            ["spike", "试探"],
+            ["hotfix", "热修"],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={intentDraft === id ? "on" : ""}
+              onClick={() => setIntentDraft(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="compose-base">
+          <span>基线</span>
+          <select value={baseDraft || project.baseBranch} onChange={(event) => setBaseDraft(event.target.value)}>
+            <option value={project.baseBranch}>{project.baseBranch}</option>
+            {[...new Set((map?.lanes || []).map((item) => item.branch))]
+              .filter((branch) => branch && branch !== project.baseBranch && !branch.startsWith("origin/"))
+              .map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
+                </option>
+              ))}
+          </select>
+        </label>
+        <small>
+          {intentDraft}/{titleDraft.trim() ? "…" : "slug"} · 先建卡，不种树
+        </small>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className="mac" data-skin={appSettings?.skin || "lean"} data-motion={appSettings?.motion || "system"} ref={shellRef}>
+      <header className="titlebar">
+        <div className="identity">
+          {grouped.find((item) => item.id === groupId)?.name || groupId}
+          <em> / </em>
+          {project?.name || "—"}
+        </div>
+        <div className="context">
+          {VIEW_LABEL[view]}
+          {selectedLane?.branch ? ` · ${selectedLane.branch}` : task?.slug ? ` · ${task.slug}` : ""}
+        </div>
+        <div className="home">
+          {project && pendingCount > 0 ? (
+            <button className="badge" onClick={() => setTab("charter")}>
+              {pendingCount} 项待批准
+            </button>
+          ) : null}
+          <span className="actor">人</span>
+          <span className={snap ? (drift.length ? "engine on drift" : "engine on") : "engine"} title={drift.length ? "AGENTS.md 托管段已漂移" : "引擎"} />
+          <button className="sliders" title="设置" onClick={() => setSettingsOpen(true)} aria-label="设置">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+              <path d="M5 9h18M5 14h18M5 19h18" stroke="currentColor" strokeWidth="1.25" />
+              <circle cx="19" cy="9" r="2.2" fill="currentColor" />
+              <circle cx="10" cy="14" r="2.2" fill="currentColor" />
+              <circle cx="16" cy="19" r="2.2" fill="currentColor" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div className="split">
+        <aside className="sidebar">
+          <p className="brand">
+            工区 <span>Agent Workzoon</span>
+          </p>
+          {grouped.map((group) => (
+            <section key={group.id}>
+              <button className={group.id === groupId ? "group on" : "group"} onClick={() => setGroupId(group.id)}>
+                {group.name}
+              </button>
+              {group.projects.map((item) => {
+                const itemMap = snap?.maps.find((entry) => entry.rootPath === item.rootPath);
+                return (
+                  <button
+                    key={item.id}
+                    className={item.id === project?.id ? "project on" : "project"}
+                    onClick={() => {
