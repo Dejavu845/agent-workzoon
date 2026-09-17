@@ -57,3 +57,13 @@ const POLICY_ACTIONS: { id: AgentAction; label: string; destructive: boolean; gr
   { id: "ingestRaw", label: "收入原文到 raw/", destructive: false, group: "百科" },
   { id: "lintFix", label: "lint 自动补 index", destructive: false, group: "百科" },
 ];
+const POLICY_GROUPS: Array<(typeof POLICY_ACTIONS)[number]["group"]> = ["任务", "分支", "宪章", "百科"];
+const TASK_STATUSES: Task["status"][] = ["backlog", "active", "review", "done", "blocked"];
+const CONSENT_LABEL: Record<Consent, string> = { never: "禁止", ask: "需确认", allow: "允许" };
+type Tab = "task" | "holdings" | "charter" | "handoff" | "wiki" | "blast";
+type Filter = "all" | "active" | "review" | "done" | "hygiene" | "undeclared";
+type View = "holdings" | "forest" | "lanes";
+const STATUS: Record<Task["status"], string> = { backlog: "待开始", active: "进行中", review: "待审", done: "已完成", blocked: "受阻" };
+const VIEW_LABEL: Record<View, string> = { holdings: "掌控", forest: "全部分支", lanes: "任务车道" };
+const TAB_LABEL: Record<Tab, string> = { holdings: "清单", task: "对照", charter: "宪章", handoff: "交接", blast: "范围", wiki: "百科" };
+export function App() { return <div className="mac">工区</div>; }
