@@ -1,0 +1,786 @@
+  lane: RepoLane;
+  selected: boolean;
+  index: number;
+  pinCount?: number;
+  canDelete?: boolean;
+  confirmDestructive?: boolean;
+  confirmValue?: string;
+  deleting?: boolean;
+  onConfirmValue?: (value: string) => void;
+  onAskDelete?: () => void;
+  onCancelDelete?: () => void;
+  onSelect: () => void;
+  onCopy: (label: string, value: string) => void;
+  onDelete?: () => void;
+}) {
+  const dot = lane.worktreePath ? "gov" : lane.isRemote ? "hollow" : "idle";
+  return (
+    <li data-rise style={{ "--i": index } as never}>
+      <div
+        className={selected ? "lane forest-row on" : "lane forest-row"}
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") onSelect();
+        }}
+      >
+        <span className="rail">
+          <span className={`dot ${dot}`} />
+        </span>
+        <span className="cell feature">
+          <span>
+            <strong>{lane.branch}</strong>
+            {lane.baseBranch ? (
+              <span className="tag idle" title="这条树从这条基线长出来">
+                基线 {lane.baseBranch}
+              </span>
+            ) : null}
+            {pinCount ? <span className="tag">{pinCount} 版产物</span> : null}
+            <small>
+              {lane.sha || "—"}
+              {lane.isHead ? " · HEAD" : ""}
+              {lane.isRemote ? " · 远程" : ""}
+              {lane.undeclared ? <span className="tag stop">清单外</span> : null}
+              <HygieneTags kinds={lane.hygiene} />
+            </small>
+          </span>
+        </span>
+        <button
+          type="button"
+          className="cell path"
+          title={lane.worktreePath ? `复制 ${lane.worktreePath}` : "还没有自己的目录"}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (lane.worktreePath) onCopy("路径", lane.worktreePath);
+            else onCopy("分支", lane.branch);
+          }}
+        >
+          {lane.worktreePath ? shorten(lane.worktreePath) : "未检出"}
+        </button>
+        <span className={`cell status ${lane.taskStatus || ""}`}>
+          {lane.taskTitle || (lane.managed ? "任务" : lane.worktreePath ? "检出" : "分支")}
+        </span>
+        <span className={deleting ? "row-actions open" : "row-actions"} onClick={(event) => event.stopPropagation()}>
+          {canDelete && onDelete ? (
+            <>
+              <button type="button" className="text danger" onClick={onAskDelete}>
+                删除
+              </button>
+              {deleting ? (
+                <div className="popover">
+                  {confirmDestructive ? (
+                    <input
+                      value={confirmValue || ""}
+                      placeholder="输入分支名"
+                      onChange={(event) => onConfirmValue?.(event.target.value)}
+                    />
+                  ) : null}
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={Boolean(confirmDestructive && confirmValue !== lane.branch)}
+                    onClick={() => {
+                      if (confirmDestructive && confirmValue !== lane.branch) return;
+                      onDelete();
+                    }}
+                  >
+                    删除分支
+                  </button>
+                  <button type="button" className="text" onClick={onCancelDelete}>
+                    取消
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </span>
+      </div>
+    </li>
+  );
+});
+
+function HygieneTags({ kinds }: { kinds?: HygieneKind[] }) {
+  if (!kinds?.length) return null;
+  const label: Record<HygieneKind, string> = {
+    merged: "已合入",
+    stale: "14 天无动",
+    "no-handoff": "缺交接",
+  };
+  return (
+    <>
+      {kinds.map((kind) => (
+        <span key={kind} className={kind === "no-handoff" ? "tag stop" : "tag idle"}>
+          {label[kind]}
+        </span>
+      ))}
+    </>
+  );
+}
+
+const LaneRow = memo(function LaneRow({
+  project,
+  task,
+  occupancy,
+  hygiene,
+  selected,
+  index,
+  onSelect,
+  onCopy,
+}: {
+  project: Project;
+  task: Task;
+  occupancy?: Occupancy;
+  hygiene?: HygieneKind[];
+  selected: boolean;
+  index: number;
+  onSelect: () => void;
+  onCopy: (label: string, value: string) => void;
+}) {
+  const lane = laneOf(project, task);
+  return (
+    <li data-rise style={{ "--i": index } as never}>
+      <div
+        className={selected ? "lane on" : "lane"}
+        role="button"
+        tabIndex={0}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") onSelect();
+        }}
+      >
+        <span className="cell feature">
+          <span className={`dot ${task.status}`} />
+          <span>
+            <strong>{task.title}</strong>
+            <small>
+              {occupancy?.agent || task.agent}
+              {task.allowFrozenTouch ? (
+                <span title={task.escalation?.reason || "没有记下破例理由"}> · 破例</span>
+              ) : (
+                ""
+              )}
+              <HygieneTags kinds={hygiene} />
+            </small>
+          </span>
+        </span>
+        <button
+          type="button"
+          className="cell mono"
+          title={`复制 ${lane.branch}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCopy("分支", lane.branch);
+          }}
+        >
+          {lane.branch}
+        </button>
+        <button
+          type="button"
+          className="cell path"
+          title={lane.path ? `复制 ${lane.path}` : "这张卡还没有自己的目录"}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (lane.path) onCopy("路径", lane.path);
+          }}
+        >
+          {lane.path ? shorten(lane.path) : "未创建"}
+        </button>
+        <span className={`cell status ${task.status}`}>{STATUS[task.status]}</span>
+      </div>
+      {occupancy ? <OccupancyStrip occupancy={occupancy} /> : null}
+    </li>
+  );
+});
+
+function PulseBox({
+  occupancy,
+  sha,
+  citeRoots,
+  busy,
+  citeHint,
+  focusNonce,
+  primary,
+  onPulse,
+  onClear,
+}: {
+  occupancy?: Occupancy;
+  sha: string;
+  citeRoots: string[];
+  busy: boolean;
+  citeHint?: { kind: "path" | "sha"; value: string; nonce: number };
+  focusNonce?: number;
+  primary?: boolean;
+  onPulse: (doing: string, cite: { kind: "path" | "sha"; value: string }, remainMin?: number) => void;
+  onClear?: () => void;
+}) {
+  const doingRef = useRef<HTMLInputElement>(null);
+  const [doing, setDoing] = useState(occupancy?.doingFrom === "pulse" ? occupancy.doing : "");
+  const [remain, setRemain] = useState(occupancy?.pulse?.remainMin ? String(occupancy.pulse.remainMin) : "");
+  const [citeKind, setCiteKind] = useState<"path" | "sha">(occupancy?.pulse?.cite.kind || (sha ? "sha" : "path"));
+  const [citeValue, setCiteValue] = useState(occupancy?.pulse?.cite.value || sha);
+  const seededSha = useRef(Boolean(occupancy?.pulse?.cite.value || sha));
+  useEffect(() => {
+    if (seededSha.current || !sha) return;
+    setCiteValue((current) => current || sha);
+    seededSha.current = true;
+  }, [sha]);
+  useEffect(() => {
+    if (!citeHint) return;
+    setCiteKind(citeHint.kind);
+    setCiteValue(citeHint.value);
+  }, [citeHint?.nonce]);
+  useEffect(() => {
+    if (focusNonce) doingRef.current?.focus();
+  }, [focusNonce]);
+  return (
+    <div className="pulse-box">
+      <p className="eyebrow">心跳</p>
+      <input
+        ref={doingRef}
+        value={doing}
+        onChange={(event) => setDoing(event.target.value)}
+        placeholder="正在做（不要写 %）"
+      />
+      <div className="pulse-cite">
+        <select value={citeKind} onChange={(event) => setCiteKind(event.target.value as "path" | "sha")}>
+          <option value="sha">版本号</option>
+          <option value="path">路径</option>
+        </select>
+        <input
+          value={citeValue}
+          onChange={(event) => setCiteValue(event.target.value)}
+          placeholder={citeKind === "sha" ? "现在的版本，或更早的一版" : "这次改动里的文件"}
+        />
+        <input
+          value={remain}
+          onChange={(event) => setRemain(event.target.value)}
+          placeholder="估 分"
+          inputMode="numeric"
+        />
+      </div>
+      <div className="row">
+        <button
+          className={primary ? "primary" : ""}
+          disabled={busy}
+          onClick={() =>
+            onPulse(
+              doing.trim(),
+              {
+                kind: citeKind,
+                value: citeKind === "sha" ? citeValue.trim().replace(/^@/, "") : relCite(citeValue.trim(), ...citeRoots),
+              },
+              remain ? Number(remain) : undefined,
+            )
+          }
+        >
+          登记
+        </button>
+        {onClear ? (
+          <button disabled={busy} onClick={onClear}>
+            清除
+          </button>
+        ) : null}
+      </div>
+      <p className="hint">
+        {citeValue.trim()
+          ? "30 分钟后过期。请标这次改的文件，或标现在的版本。不写进交接。"
+          : citeKind === "sha"
+            ? "还没标是哪一版。点对照里的版本号，或点源码文件。"
+            : "还没标到哪。点对照里的源码文件，或改用版本号。"}
+      </p>
+    </div>
+  );
+}
+
+function OccupancyStrip({ occupancy }: { occupancy: Occupancy }) {
+  return (
+    <div className="lane-occupancy">
+      <span className="doing" title={occupancy.doingFrom === "pulse" ? "心跳" : "正在做（推导，不是自报）"}>
+        {occupancy.doing}
+        {occupancy.pulse?.remainMin ? <span className="tag idle">估 {occupancy.pulse.remainMin} 分</span> : null}
+      </span>
+      <span className="evidence" title="证据格，不是完成度">
+        <span className="evidence-cells" aria-hidden>
+          {occupancy.evidence.map((cell) => (
+            <i
+              key={cell.id}
+              className={cell.skipped ? "skip" : cell.lit ? (occupancy.doingFrom === "pulse" ? "on live" : "on") : ""}
+              title={cell.label}
+            />
+          ))}
+        </span>
+        证据 {occupancy.lit}/{occupancy.denom}
+      </span>
+      <span className="idle">闲置 {formatIdle(occupancy.idleMs)}</span>
+    </div>
+  );
+}
+
+function GaugeStrip({
+  branchCount,
+  treeCount,
+  taskCount,
+  artifactCount,
+  uncheckedCount,
+  taskStats,
+  hygieneCount,
+  undeclaredCount,
+  onOpenForest,
+  onOpenHygiene,
+  onOpenUndeclared,
+  onOpenLanes,
+  onOpenArtifacts,
+}: {
+  branchCount: number;
+  treeCount: number;
+  taskCount: number;
+  artifactCount: number;
+  uncheckedCount: number;
+  taskStats: Record<Task["status"], number>;
+  hygieneCount?: number;
+  undeclaredCount?: number;
+  onOpenForest: () => void;
+  onOpenHygiene?: () => void;
+  onOpenUndeclared?: () => void;
+  onOpenLanes: () => void;
+  onOpenArtifacts: () => void;
+}) {
+  const treePct = branchCount ? Math.min(100, (treeCount / branchCount) * 100) : 0;
+  return (
+    <div className="gauges">
+      <button
+        type="button"
+        className="gauge"
+        data-rise
+        style={{ "--i": 0 } as never}
+        onClick={undeclaredCount && onOpenUndeclared ? onOpenUndeclared : hygieneCount && onOpenHygiene ? onOpenHygiene : onOpenForest}
+      >
+        <p className="eyebrow">分支</p>
+        <p className="gauge-num">{branchCount}</p>
+        <div className="meter"><i style={{ width: branchCount ? "100%" : "0%" }} /></div>
+        {uncheckedCount ? <p className="delta">{uncheckedCount} 条未检出</p> : null}
+        {undeclaredCount ? <p className="delta">{undeclaredCount} 条清单外</p> : null}
+        {hygieneCount ? <p className="delta">{hygieneCount} 条待清理</p> : null}
+      </button>
+      <button type="button" className="gauge" data-rise style={{ "--i": 1 } as never} onClick={onOpenForest}>
+        <p className="eyebrow">树</p>
+        <p className="gauge-num">{treeCount}</p>
+        <p className="gauge-den">/ {branchCount}</p>
+        <div className="meter"><i style={{ width: `${treePct}%` }} /></div>
+      </button>
+      <button type="button" className="gauge" data-rise style={{ "--i": 2 } as never} onClick={onOpenLanes}>
+        <p className="eyebrow">任务</p>
+        <p className="gauge-num">{taskCount}</p>
+        <div className="meter task">
+          {TASK_STATUSES.map((status) =>
+            taskStats[status] ? <i key={status} className={`seg-${status}`} style={{ flexGrow: taskStats[status] }} /> : null,
+          )}
+        </div>
+      </button>
+      <button type="button" className="gauge" data-rise style={{ "--i": 3 } as never} onClick={onOpenArtifacts}>
+        <p className="eyebrow">产物</p>
+        <p className="gauge-num">{artifactCount}</p>
+        <div className="meter"><i style={{ width: artifactCount ? "100%" : "0%" }} /></div>
+      </button>
+    </div>
+  );
+}
+
+function HoldingsSource({
+  project,
+  holdings,
+  onCopy,
+}: {
+  project: Project;
+  holdings: Holdings | null;
+  onCopy: (label: string, value: string) => void;
+}) {
+  const remotes = holdings?.remotes || [];
+  return (
+    <section data-rise style={{ "--i": 4 } as never}>
+      <p className="eyebrow">来源</p>
+      <ul className="notes">
+        {remotes.length ? remotes.map((item) => (
+          <li key={item.name}>
+            <button className="link" onClick={() => onCopy("远程", item.url)}>
+              {item.name} · {item.url}
+            </button>
+          </li>
+        )) : <li>还没有远程</li>}
+        <li>
+          <button className="link" onClick={() => onCopy("基线分支", project.baseBranch)}>
+            基线 · {project.baseBranch}
+          </button>
+        </li>
+        <li>
+          <button className="link" onClick={() => onCopy("仓库路径", project.rootPath)}>
+            主树 · {project.rootPath}
+          </button>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+function ProcessStrip({
+  view,
+  focus,
+  onStep,
+}: {
+  view: ReturnType<typeof processStripView> | null;
+  focus: ProcessStep;
+  onStep: (step: ProcessStep) => void;
+}) {
+  return (
+    <section data-rise style={{ "--i": 5 } as never}>
+      <p className="eyebrow">工序</p>
+      {view ? (
+        <ol
+          className="process-strip"
+          style={{ "--strip-i": PROCESS_STEPS.findIndex((item) => item.id === focus) } as never}
+        >
+          {PROCESS_STEPS.map((step, index) => (
+            <li key={step.id}>
+              {index ? <span className="arrow" aria-hidden /> : null}
+              <button
+                type="button"
+                className={focus === step.id ? "step on" : "step"}
+                onClick={() => onStep(step.id)}
+              >
+                <em>{step.kicker}</em>
+                <strong>{stripLabel(view, step.id)}</strong>
+              </button>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="hint">读图中</p>
+      )}
+    </section>
+  );
+}
+
+function OnDutySat({
+  rows,
+  onOpen,
+}: {
+  rows: Occupancy[];
+  onOpen: (taskId: string) => void;
+}) {
+  if (!rows.length) return null;
+  return (
+    <section className="onduty" data-rise style={{ "--i": 6 } as never}>
+      <p className="eyebrow">在岗</p>
+      <ul className="notes">
+        {rows.map((row) => (
+          <li key={row.taskId}>
+            <button type="button" className={row.pulse ? "link live" : "link"} onClick={() => onOpen(row.taskId)}>
+              <strong>{row.agent}</strong>
+              <span> · {row.doing}</span>
+              {row.pulse?.remainMin ? <span className="tag idle">估 {row.pulse.remainMin} 分</span> : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function HoldingsPane({
+  holdings,
+  lane,
+  focusBranch,
+  ledger,
+  busy,
+  confirmDestructive,
+  archiveName,
+  onCopy,
+  onPin,
+  onUnpin,
+  onArchive,
+}: {
+  holdings: Holdings | null;
+  lane: RepoLane | null;
+  focusBranch?: string;
+  ledger: string[];
+  busy: boolean;
+  confirmDestructive?: boolean;
+  archiveName?: string;
+  onCopy: (label: string, value: string) => void;
+  onPin?: (name: string, checkout: string) => void;
+  onUnpin?: (id: string) => void;
+  onArchive?: (confirm: string) => void;
+}) {
+  const [archiveFor, setArchiveFor] = useState(false);
+  const [archiveTyped, setArchiveTyped] = useState("");
+  const versions = holdings?.versions || [];
+  const ranked = focusBranch
+    ? [...versions].sort((a, b) => Number(b.branch === focusBranch) - Number(a.branch === focusBranch))
+    : versions;
+  return (
+    <div className="pane">
+      <h2>人掌控，Agent 遵守</h2>
+      <p className="hint">仓、分支、目录和产物都记在工区里。钉住的是记录，不把文件拷进分支。</p>
+      {lane ? (
+        <ol className="map">
+          <li>
+            <em>分支</em>
+            <button className="link" onClick={() => onCopy("分支", lane.branch)}>{lane.branch}</button>
+          </li>
+          <li>
+            <em>路径</em>
+            <button className="link" onClick={() => lane.worktreePath && onCopy("路径", lane.worktreePath)}>
+              {lane.worktreePath || "未检出"}
+            </button>
+          </li>
+        </ol>
+      ) : null}
+      {onArchive ? (
+        <div className="row">
+          <button type="button" disabled={busy} onClick={() => setArchiveFor(true)}>
+            归档 worktree
+          </button>
+          {archiveFor ? (
+            <div className="popover">
+              {confirmDestructive ? (
+                <input
+                  value={archiveTyped}
+                  placeholder={`输入 ${archiveName || "分支名"}`}
+                  onChange={(event) => setArchiveTyped(event.target.value)}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="danger"
+                disabled={Boolean(confirmDestructive && archiveTyped !== archiveName)}
+                onClick={() => {
+                  if (confirmDestructive && archiveTyped !== archiveName) return;
+                  onArchive(archiveTyped || archiveName || "");
+                  setArchiveFor(false);
+                  setArchiveTyped("");
+                }}
+              >
+                确认归档
+              </button>
+              <button
+                type="button"
+                className="text"
+                onClick={() => {
+                  setArchiveFor(false);
+                  setArchiveTyped("");
+                }}
+              >
+                取消
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <h3>产物</h3>
+      <ul className="notes">
+        {(holdings?.artifacts || []).map((item) => (
+          <li key={item.path}>
+            <button className="link" onClick={() => onCopy("产物", item.path)}>
+              <strong>{item.name}</strong>
+            </button>
+            <small>
+              {item.ignored ? "已忽略" : "已跟踪"}
+              {item.branch ? ` · 在 ${item.branch}` : ""}
+              {item.sha ? ` @${item.sha.slice(0, 12)}` : ""}
+              {item.pinnedId ? " · 已钉这一版" : ""}
+            </small>
+            {onPin ? (
+              <div className="row">
+                <button type="button" disabled={busy} onClick={() => onPin(item.name, item.checkout)}>
+                  钉这一版
+                </button>
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <h3>版本</h3>
+      <ul className="notes">
+        {ranked.length ? ranked.map((item) => (
+          <li key={item.id} className={focusBranch && item.branch === focusBranch ? "on" : undefined}>
+            <button className="link" onClick={() => onCopy("产物版本", item.id)}>
+              <strong>{item.name}</strong> @{item.sha.slice(0, 12)}
+            </button>
+            <small>
+              {item.branch}
+              {" · "}
+              <span className={item.state === "missing" ? "tag stop" : item.state === "changed" ? "tag idle" : "tag"}>
+                {item.state}
+              </span>
+              {item.onBranch ? "" : " · 不在这支"}
+              {item.behind ? ` · 落后 ${item.behind}` : ""}
+              {item.dirty ? " · 有未保存" : ""}
+              {item.note ? ` · ${item.note}` : ""}
+            </small>
+            {onUnpin ? (
+              <div className="row">
+                <button type="button" disabled={busy} onClick={() => onUnpin(item.id)}>
+                  取消钉
+                </button>
+              </div>
+            ) : null}
+          </li>
+        )) : <li>还没有钉住的版本</li>}
+      </ul>
+      {holdings?.markdown ? <pre>{holdings.markdown}</pre> : null}
+      <LedgerTail lines={ledger} />
+    </div>
+  );
+}
+
+function RepoTrunk({
+  project,
+  onCopy,
+}: {
+  project: Project;
+  onCopy: (label: string, value: string) => void;
+}) {
+  return (
+    <div className="trunk">
+      <div>
+        <p className="eyebrow">代码仓库</p>
+        <h1>{project.name}</h1>
+        <p className="crumb">
+          <button className="chip" onClick={() => onCopy("仓库路径", project.rootPath)}>
+            {project.rootPath}
+          </button>
+          <span className="arrow" />
+          <button className="chip" onClick={() => onCopy("基线分支", project.baseBranch)}>
+            {project.baseBranch}
+          </button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Empty({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="empty">
+      <h2>{title}</h2>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function CharterPane({
+  project,
+  drift,
+  requests,
+  busy,
+  onSync,
+  onDecide,
+  onPolicy,
+}: {
+  project: Project;
+  drift: Drift[];
+  requests: ConsentRequest[];
+  busy: boolean;
+  onSync: () => void;
+  onDecide: (id: string, approve: boolean) => void;
+  onPolicy: (partial: {
+    preset?: PolicyPreset;
+    agentMay?: Partial<Record<AgentAction, Consent>>;
+    wiki?: Policy["wiki"];
+  }) => void;
+}) {
+  return (
+    <div className="pane">
+      {drift.length ? (
+        <p className="drift-line">
+          AGENTS.md 托管段{{ edited: "被手改", missing: "缺失", stale: "无签名（旧格式）" }[drift[0].kind]}。
+          <button className="text" disabled={busy} onClick={onSync}>同步</button>
+        </p>
+      ) : null}
+      <RequestsList requests={requests} busy={busy} onDecide={onDecide} />
+      <LayersSection project={project} />
+      <PolicySection project={project} busy={busy} onPolicy={onPolicy} />
+    </div>
+  );
+}
+
+function LayersSection({ project }: { project: Project }) {
+  return (
+    <>
+      <h2>分层与禁区</h2>
+      <p className="hint">宪章 v{project.charter.version || 1}</p>
+      <p>{project.charter.purpose}</p>
+      <h3>分层</h3>
+      <ul className="layers">
+        {project.charter.layers.map((layer) => (
+          <li key={layer.id}>
+            <strong>{layer.name}</strong>
+            <span className={layer.frozen ? "frozen" : "open"}>{layer.frozen ? "冻" : "开"}</span>
+            <small>{layer.paths.join(", ")}</small>
+          </li>
+        ))}
+      </ul>
+      <h3>禁区</h3>
+      <p>{project.charter.doNotTouch.join(", ")}</p>
+    </>
+  );
+}
+
+function RequestsList({
+  requests,
+  busy,
+  onDecide,
+}: {
+  requests: ConsentRequest[];
+  busy: boolean;
+  onDecide: (id: string, approve: boolean) => void;
+}) {
+  return (
+    <section className="inbox">
+      <h2>待批准</h2>
+      {requests.length === 0 ? (
+        <p className="hint">没有 Agent 在等你点头。</p>
+      ) : (
+        <ul className="notes">
+          {requests.map((item) => (
+            <li key={item.id} className="request">
+              <strong>{POLICY_ACTIONS.find((action) => action.id === item.action)?.label || item.action}</strong>
+              <small>{item.reason}</small>
+              <div className="row">
+                <button className="text" disabled={busy} onClick={() => onDecide(item.id, true)}>
+                  批准
+                </button>
+                <button className="text" disabled={busy} onClick={() => onDecide(item.id, false)}>
+                  拒绝
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PolicySection({
+  project,
+  busy,
+  onPolicy,
+}: {
+  project: Project;
+  busy: boolean;
+  onPolicy: (partial: {
+    preset?: PolicyPreset;
+    agentMay?: Partial<Record<AgentAction, Consent>>;
+    wiki?: Policy["wiki"];
+  }) => void;
+}) {
+  const policy = project.policy;
+  if (!policy) return <p className="hint">这个仓还没定谁能做什么。</p>;
+  return (
+    <section>
+      <h2>Agent 授权</h2>
+      <p className="hint">伤筋动骨的事，最多做到「先问你」。</p>
+      <div className="seg">
+        {([
