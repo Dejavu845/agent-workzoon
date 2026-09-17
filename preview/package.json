@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "assemble": "node ./assemble-app.mjs",
+    "predev": "node ./assemble-app.mjs",
+    "prebuild": "node ./assemble-app.mjs",
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build"
   },
