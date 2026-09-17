@@ -20,6 +20,8 @@ node --experimental-strip-types src/server.ts   # :7780
 cd preview && pnpm install && pnpm dev          # :5173
 ```
 
+`cd preview && pnpm install && pnpm dev` will stitch App.tsx from the four parts before Vite starts. The four parts concatenate to the 28a9266 App.tsx (94386 bytes).
+
 `LATTICE_HOME` 必须在被治理的仓外面。不要对正在开发的主树随手 `git worktree add`。演示请登记 fixture 仓（例如 `demo-harbor`、`api-gateway`；清单外可用 `scratch-notepad`）。
 
 ## CLI

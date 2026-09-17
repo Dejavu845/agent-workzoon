@@ -41,6 +41,8 @@ node --experimental-strip-types src/server.ts          # :7780
 cd preview && pnpm install && pnpm dev                 # :5173
 ```
 
+`cd preview && pnpm install && pnpm dev` will stitch App.tsx from the four parts before Vite starts. The four parts concatenate to the 28a9266 App.tsx (94386 bytes).
+
 浏览器打开 `http://127.0.0.1:5173/`。登记一个 **fixture 仓**（不要登记 dejavu-notes 自己，也不要登记这个快照仓当生产 Harbor）。
 
 ## 人怎么走一遍
