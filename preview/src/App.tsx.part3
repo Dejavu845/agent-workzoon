@@ -1,0 +1,582 @@
+          ["locked", "锁定"],
+          ["balanced", "平衡"],
+          ["open", "开放"],
+        ] as [PolicyPreset, string][]).map(([preset, label]) => (
+          <button
+            key={preset}
+            className={policy.preset === preset ? "on" : ""}
+            disabled={busy}
+            onClick={() => onPolicy({ preset })}
+          >
+            {label}
+          </button>
+        ))}
+        {policy.preset === "custom" ? <button className="on" type="button">自定义</button> : null}
+      </div>
+      <details className="policy-details">
+        <summary>逐项授权</summary>
+        {POLICY_GROUPS.map((group) => (
+          <div key={group} className="policy-group">
+            <h3>{group}</h3>
+            {POLICY_ACTIONS.filter((item) => item.group === group).map((item) => {
+              const value = policy.agentMay[item.id];
+              return (
+                <div key={item.id} className="policy-row">
+                  <span>
+                    {item.label}
+                    {item.destructive ? <small> · 破坏性</small> : null}
+                  </span>
+                  <div className="consent">
+                    {(["never", "ask", "allow"] as Consent[]).map((level) => {
+                      const blocked = item.destructive && level === "allow";
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          className={`${value === level ? "on" : ""}${blocked ? " hatch" : ""}`.trim()}
+                          disabled={busy || blocked}
+                          onClick={() => onPolicy({ agentMay: { [item.id]: level } })}
+                        >
+                          {CONSENT_LABEL[level]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {(["concepts", "sources", "syntheses"] as const).map((bucket) => {
+          const on = policy.wiki.agentWrites[bucket];
+          const label = bucket === "concepts" ? "概念" : bucket === "sources" ? "来源页" : "综合";
+          return (
+            <div key={bucket} className="policy-row">
+              <span>Agent 可写 wiki/{label}</span>
+              <div className="consent">
+                <button
+                  type="button"
+                  className={!on ? "on" : ""}
+                  disabled={busy}
+                  onClick={() =>
+                    onPolicy({
+                      wiki: { ...policy.wiki, agentWrites: { ...policy.wiki.agentWrites, [bucket]: false } },
+                    })
+                  }
+                >
+                  禁止
+                </button>
+                <button
+                  type="button"
+                  className={on ? "on" : ""}
+                  disabled={busy}
+                  onClick={() =>
+                    onPolicy({
+                      wiki: { ...policy.wiki, agentWrites: { ...policy.wiki.agentWrites, [bucket]: true } },
+                    })
+                  }
+                >
+                  允许
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        <label className="policy-row">
+          <span>完成前百科检查</span>
+          <select
+            value={policy.wiki.gate}
+            disabled={busy}
+            onChange={(event) => onPolicy({ wiki: { ...policy.wiki, gate: event.target.value as Policy["wiki"]["gate"] } })}
+          >
+            <option value="off">关闭</option>
+            <option value="warn">警告</option>
+            <option value="block">拦截</option>
+          </select>
+        </label>
+        <label className="policy-row">
+          <span>交接进 raw</span>
+          <select
+            value={policy.wiki.ingestHandoffs}
+            disabled={busy}
+            onChange={(event) =>
+              onPolicy({ wiki: { ...policy.wiki, ingestHandoffs: event.target.value as Policy["wiki"]["ingestHandoffs"] } })
+            }
+          >
+            <option value="always">立即</option>
+            <option value="onDone">完成时</option>
+          </select>
+        </label>
+      </details>
+    </section>
+  );
+}
+
+function LedgerTail({ lines }: { lines: string[] }) {
+  return (
+    <section>
+      <h3>账本</h3>
+      {lines.length === 0 ? (
+        <p className="hint">还没有治理动作。</p>
+      ) : (
+        <ul className="notes">
+          {lines.map((line) => (
+            <li key={line}>
+              <small>{line.replace(/^##\s+/, "")}</small>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function SettingsSheet({
+  settings,
+  onClose,
+  onSave,
+}: {
+  settings: AppSettings | null;
+  onClose: () => void;
+  onSave: (partial: Partial<AppSettings>) => void;
+}) {
+  const [openIn, setOpenIn] = useState(settings?.openIn || "cursor");
+  const [worktreesRoot, setWorktreesRoot] = useState(settings?.worktreesRoot || "");
+  const [defaultPreset, setDefaultPreset] = useState<PolicyPreset>(settings?.defaultPreset || "balanced");
+  const [confirmDestructive, setConfirmDestructive] = useState(settings?.confirmDestructive !== false);
+  const [motion, setMotion] = useState(settings?.motion || "system");
+  const [skin, setSkin] = useState<AppSkin>(settings?.skin === "forge" ? "forge" : "lean");
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(event) => event.stopPropagation()}>
+        <p className="eyebrow">机器设置</p>
+        <h2>App 设置</h2>
+        <p className="eyebrow">视图皮肤</p>
+        <div className="skin-pick" role="radiogroup" aria-label="视图皮肤">
+          <button
+            type="button"
+            className={skin === "lean" ? "on" : ""}
+            onClick={() => {
+              setSkin("lean");
+              onSave({ skin: "lean" });
+            }}
+          >
+            <strong>干练</strong>
+            <span>现在这套纸面工区。列表清楚，少装饰。</span>
+          </button>
+          <button
+            type="button"
+            className={skin === "forge" ? "on" : ""}
+            onClick={() => {
+              setSkin("forge");
+              onSave({ skin: "forge" });
+            }}
+          >
+            <strong>工场</strong>
+            <span>深色晶圆工位。中栏分层视差：远景反滚，工位跟手。</span>
+          </button>
+        </div>
+        <label className="policy-row">
+          <span>打开配方</span>
+          <select value={openIn} onChange={(event) => setOpenIn(event.target.value as AppSettings["openIn"])}>
+            <option value="cursor">Cursor</option>
+            <option value="vscode">VS Code</option>
+            <option value="finder">Finder</option>
+            <option value="terminal">终端</option>
+            <option value="none">只复制路径</option>
+          </select>
+        </label>
+        <p className="hint">只复制命令，不替你开软件。请在本机终端自己粘贴。</p>
+        <label className="policy-row">
+          <span>新树放在哪</span>
+          <input
+            value={worktreesRoot}
+            onChange={(event) => setWorktreesRoot(event.target.value)}
+            placeholder="~/Workzoon/worktrees"
+          />
+        </label>
+        <p className="hint">新的工作目录：根目录 / 项目名 / 任务名。已经建好的不搬家。</p>
+        <label className="policy-row">
+          <span>新登记仓的默认预设</span>
+          <select value={defaultPreset} onChange={(event) => setDefaultPreset(event.target.value as PolicyPreset)}>
+            <option value="locked">锁定</option>
+            <option value="balanced">平衡</option>
+            <option value="open">开放</option>
+          </select>
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={confirmDestructive}
+            onChange={(event) => setConfirmDestructive(event.target.checked)}
+          />
+          破坏性操作要求输入名称确认
+        </label>
+        <label className="policy-row">
+          <span>动效</span>
+          <select value={motion} onChange={(event) => setMotion(event.target.value as AppSettings["motion"])}>
+            <option value="system">跟随系统</option>
+            <option value="off">关闭</option>
+          </select>
+        </label>
+        <div className="row">
+          <button
+            className="primary"
+            onClick={() => onSave({ openIn, worktreesRoot, defaultPreset, confirmDestructive, motion, skin })}
+          >
+            保存
+          </button>
+          <button onClick={onClose}>取消</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RegisterSheet({
+  nameDraft,
+  rootDraft,
+  busy,
+  onName,
+  onRoot,
+  onClose,
+  onSubmit,
+}: {
+  nameDraft: string;
+  rootDraft: string;
+  busy: boolean;
+  onName: (value: string) => void;
+  onRoot: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(event) => event.stopPropagation()}>
+        <p className="eyebrow">登记仓</p>
+        <h2>把这个仓库登记进来</h2>
+        <input value={nameDraft} onChange={(event) => onName(event.target.value)} placeholder="项目名" />
+        <input value={rootDraft} onChange={(event) => onRoot(event.target.value)} placeholder="仓库最外面那一层，不要填已经开出来的树" />
+        <div className="row">
+          <button className="primary" disabled={busy} onClick={onSubmit}>
+            登记这个仓库
+          </button>
+          <button onClick={onClose}>取消</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function relCite(abs: string, ...roots: string[]): string {
+  const raw = abs.trim().replace(/^@/, "");
+  if (!raw.startsWith("/")) return raw;
+  for (const root of roots) {
+    if (!root) continue;
+    const prefix = root.endsWith("/") ? root : `${root}/`;
+    if (raw.startsWith(prefix)) return raw.slice(prefix.length);
+  }
+  return raw;
+}
+
+function MapPane({
+  project,
+  task,
+  occupancy,
+  loop,
+  lane,
+  files,
+  browsePath,
+  busy,
+  onCopy,
+  onBrowse,
+  onLoop,
+  onOpen,
+  onPlant,
+  openIn,
+  onPulse,
+  onClearPulse,
+  pulseFocus,
+  onFocusPulse,
+}: {
+  project: Project;
+  task: Task | null;
+  occupancy?: Occupancy;
+  loop: ReturnType<typeof loopFromOccupancy> | null;
+  lane: RepoLane | null;
+  files: SourceEntry[];
+  browsePath: string;
+  busy: boolean;
+  onCopy: (label: string, value: string) => void;
+  onBrowse: (path: string) => void;
+  onLoop?: (step: LoopStep) => void;
+  onOpen?: () => void;
+  onPlant?: () => void;
+  openIn: AppSettings["openIn"];
+  onPulse?: (doing: string, cite: { kind: "path" | "sha"; value: string }, remainMin?: number) => void;
+  onClearPulse?: () => void;
+  pulseFocus?: number;
+  onFocusPulse?: () => void;
+}) {
+  const owned = task ? laneOf(project, task) : null;
+  const branch = lane?.branch || owned?.branch || project.baseBranch;
+  const path = bayPath(lane?.worktreePath, project.rootPath) || bayPath(owned?.path, project.rootPath);
+  const recipe = path ? openRecipe(openIn, path) : null;
+  const stackedBase =
+    lane?.baseBranch ||
+    (task?.baseBranch && task.baseBranch !== project.baseBranch ? task.baseBranch : undefined);
+  const [citeHint, setCiteHint] = useState<{ kind: "path" | "sha"; value: string; nonce: number }>();
+  const intent = nextHandIntent(loop);
+  const planted = Boolean(path || loop?.lit.tree);
+  return (
+    <div className="pane">
+      <h2>{task?.title || lane?.subject || project.name}</h2>
+      {task && loop ? (
+        <LoopRail
+          loop={loop}
+          onStep={(step) => onLoop?.(step)}
+        />
+      ) : null}
+      <ol className="map">
+        <li>
+          <em>仓</em>
+          <button className="link" onClick={() => onCopy("仓库路径", project.rootPath)}>
+            {project.rootPath}
+          </button>
+        </li>
+        <li>
+          <em>分支</em>
+          <button className="link" onClick={() => onCopy("分支", branch)}>
+            {branch}
+          </button>
+          {stackedBase ? <small> · 基线 {stackedBase}</small> : null}
+        </li>
+        <li>
+          <em>路径</em>
+          <button className="link" onClick={() => path && onCopy("路径", path)}>
+            {path || "创建后才会有独立目录"}
+          </button>
+        </li>
+      </ol>
+      {occupancy ? (
+        <div className="occupancy-detail">
+          <OccupancyStrip occupancy={occupancy} />
+          <p className="hint">
+            {occupancy.sha12 ? (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  setCiteHint({ kind: "sha", value: occupancy.sha12, nonce: Date.now() });
+                  onCopy("sha", occupancy.sha12);
+                }}
+              >
+                @{occupancy.sha12}
+              </button>
+            ) : (
+              "还没有版本号"
+            )}
+            {occupancy.ahead ? ` · 领先 ${occupancy.ahead}` : ""}
+            {occupancy.behind ? ` · 落后 ${occupancy.behind}` : ""}
+            {occupancy.files ? ` · 相对主干 ${occupancy.files} 个文件` : ""}
+          </p>
+        </div>
+      ) : null}
+      {task && onPulse && planted ? (
+        <PulseBox
+          occupancy={occupancy}
+          sha={occupancy?.sha12 || lane?.sha || ""}
+          citeRoots={[path, project.rootPath]}
+          busy={busy}
+          citeHint={citeHint}
+          focusNonce={pulseFocus}
+          primary={intent === "pulse"}
+          onPulse={onPulse}
+          onClear={onClearPulse}
+        />
+      ) : null}
+      {task ? (
+        <>
+          <p className="hint">这张卡能改 {task.allowedPaths.join(", ") || "没冻住的部分"} · 助手是 {task.agent}。只给打开办法，不替你开软件。</p>
+          {intent === "tree" && onOpen ? (
+            <button className="primary" disabled={busy} onClick={onOpen}>
+              {loop?.verb || "创建 worktree"}
+            </button>
+          ) : intent === "handoff" ? (
+            <button className="primary" type="button" onClick={() => onLoop?.("handoff")}>
+              {loop?.verb}
+            </button>
+          ) : intent === "done" || intent === "wiki" ? (
+            <button className="primary" type="button" onClick={() => onLoop?.("done")}>
+              {loop?.verb}
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <p className="hint">这是仓库里已有的分支。点路径复制给助手；还没开目录的可以创建 worktree。只给打开办法，不替你开软件。</p>
+          {onPlant ? (
+            <button className="primary" disabled={busy} onClick={onPlant}>
+              检出这条分支
+            </button>
+          ) : null}
+        </>
+      )}
+      {recipe ? (
+        <p className="hint">
+          <button type="button" className="link" onClick={() => onCopy(recipe.label, recipe.command)}>
+            复制配方 · {recipe.label}
+          </button>
+        </p>
+      ) : null}
+      <h3>源码</h3>
+      <p className="crumb">
+        <button className="chip" onClick={() => onBrowse(path || project.rootPath)}>
+          {shorten(browsePath)}
+        </button>
+      </p>
+      <ul className="files">
+        {files.map((entry) => (
+          <li key={entry.path}>
+            <button
+              className="link"
+              onClick={() => {
+                if (entry.kind === "dir") onBrowse(entry.path);
+                else {
+                  setCiteHint({
+                    kind: "path",
+                    value: relCite(entry.path, path, project.rootPath),
+                    nonce: Date.now(),
+                  });
+                  onCopy("文件", entry.path);
+                }
+              }}
+            >
+              {entry.kind === "dir" ? "▸ " : ""}
+              {entry.name}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="hint">j / k 换行。/ 百科，2 交接，n 下一手。f 全部分支，l 任务。</p>
+    </div>
+  );
+}
+
+function HandoffPane({
+  decisionDraft,
+  nextDraft,
+  handoffText,
+  promptText,
+  loop,
+  busy,
+  onLoop,
+  onOpen,
+  onDecision,
+  onNext,
+  onGenerate,
+  onDone,
+}: {
+  decisionDraft: string;
+  nextDraft: string;
+  handoffText: string;
+  promptText: string;
+  loop: ReturnType<typeof loopFromOccupancy> | null;
+  busy: boolean;
+  onLoop?: (step: LoopStep) => void;
+  onOpen?: () => void;
+  onDecision: (value: string) => void;
+  onNext: (value: string) => void;
+  onGenerate: () => void;
+  onDone: () => void;
+}) {
+  const intent = nextHandIntent(loop);
+  const canDone = loop ? loop.verb === "标记完成" : Boolean(handoffText);
+  return (
+    <div className="pane">
+      <h2>交接</h2>
+      {loop ? (
+        <LoopRail
+          loop={loop}
+          onStep={(step) => {
+            onLoop?.(step);
+          }}
+        />
+      ) : null}
+      {intent === "tree" ? null : (
+        <>
+          <textarea value={decisionDraft} onChange={(event) => onDecision(event.target.value)} placeholder="决定与理由" />
+          <textarea value={nextDraft} onChange={(event) => onNext(event.target.value)} placeholder="下一步的具体动作" />
+        </>
+      )}
+      <div className="row">
+        {intent === "tree" ? (
+          <button className="primary" disabled={busy} onClick={() => (onOpen ? onOpen() : onLoop?.("tree"))}>
+            {loop?.verb || "创建 worktree"}
+          </button>
+        ) : intent === "pulse" ? (
+          <button className="primary" type="button" onClick={() => onLoop?.("pulse")}>
+            {loop?.verb || "登记心跳"}
+          </button>
+        ) : intent === "wiki" ? (
+          <button className="primary" type="button" onClick={() => onLoop?.("done")}>
+            {loop?.verb}
+          </button>
+        ) : intent === "done" ? (
+          <button className="primary" disabled={busy || !canDone} onClick={onDone}>
+            {loop?.verb || "标记完成"}
+          </button>
+        ) : intent === "handoff" ? (
+          <button className="primary" disabled={busy} onClick={onGenerate}>
+            生成交接
+          </button>
+        ) : null}
+        {intent === "handoff" || !intent ? (
+          <button disabled={busy || !canDone} onClick={onDone}>
+            标记完成
+          </button>
+        ) : intent === "pulse" || intent === "done" || intent === "wiki" ? (
+          <button disabled={busy} onClick={onGenerate}>
+            生成交接
+          </button>
+        ) : null}
+      </div>
+      {handoffText ? (
+        <pre>{handoffText}</pre>
+      ) : intent === "tree" ? null : (
+        <p className="hint">没有交接文件就不能完成。</p>
+      )}
+      {promptText ? (
+        <button onClick={() => void navigator.clipboard.writeText(promptText)}>复制给下一位 Agent</button>
+      ) : null}
+    </div>
+  );
+}
+
+function BlastPane({ blast, busy, onCheck }: { blast: BlastReport | null; busy: boolean; onCheck: () => void }) {
+  return (
+    <div className="pane">
+      <h2>影响范围</h2>
+      <button className="primary" disabled={busy} onClick={onCheck}>
+        对照宪章检查
+      </button>
+      {blast ? (
+        <>
+          <p className={`verdict ${blast.verdict}`}>{blast.verdict === "blocked" ? "越界" : blast.verdict}</p>
+          <p className="hint">对照宪章 v{blast.charterVersion}</p>
+          <ul className="findings">
+            {blast.findings.map((item) => (
+              <li key={`${item.path}-${item.reason}`}>
+                <span className={item.verdict}>{item.verdict}</span>
+                <code>{item.path}</code>
+                <small>{item.reason}</small>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="hint">只看这张卡自己的目录，不会翻整仓。</p>
+      )}
+    </div>
+  );
+}
