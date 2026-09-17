@@ -1,0 +1,577 @@
+                      setProjectId(item.id);
+                      setTaskId(item.tasks[0]?.id || null);
+                      setLaneId(itemMap?.lanes[0]?.id || null);
+                      setBrowsePath("");
+                      setTab("task");
+                      setView("holdings");
+                    }}
+                  >
+                    <strong>{item.name}</strong>
+                    <small>
+                      {item.baseBranch} · {liveBayCount(itemMap?.lanes || [], item.rootPath)} 概树 · {item.tasks.filter((entry) => entry.status === "active").length} 进行中
+                    </small>
+                  </button>
+                );
+              })}
+            </section>
+          ))}
+          <button type="button" className="add" onClick={() => setRegisterOpen(true)}>
+            + 登记仓
+          </button>
+        </aside>
+
+        <main className="content" ref={contentRef} data-view={view}>
+          {appSettings?.skin === "forge" ? (
+            <div className="parallax-sky" aria-hidden>
+              <i className="layer far" />
+              <i className="layer mid" />
+              <i className="layer horizon" />
+              <i className="layer near" />
+            </div>
+          ) : null}
+          {!project ? (
+            <Empty title="还没有仓库" body="点左下「+ 登记仓」把仓库加进来。工区会列出每条分支、每棵树，并整理一本给助手读的百科。" />
+          ) : (
+            <>
+              <RepoTrunk project={project} onCopy={copy} />
+              <div className="toolbar">
+                <div className="filters" role="tablist">
+                  {(["holdings", "forest", "lanes"] as View[]).map((item) => (
+                    <button key={item} className={view === item ? "on" : ""} onClick={() => setView(item)}>
+                      {VIEW_LABEL[item]}
+                    </button>
+                  ))}
+                </div>
+                <div className="toolbar-end">
+                  {view !== "holdings" ? (
+                    <div className="filters" role="tablist">
+                      {(["all", "active", "review", "done", "hygiene", "undeclared"] as Filter[]).map((item) => (
+                        <button
+                          key={item}
+                          className={filter === item ? "on" : ""}
+                          title={FILTER_TITLE[item]}
+                          onClick={() => setFilter(item)}
+                        >
+                          {FILTER_LABEL[item]}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={composeOpen ? "ghost on" : "ghost"}
+                    onClick={() => {
+                      setComposeOpen((value) => !value);
+                      setView("lanes");
+                    }}
+                  >
+                    + 新任务
+                  </button>
+                </div>
+              </div>
+              {composeOpen ? composeBar : null}
+
+              <div className="scene" ref={sceneRef} data-scene={view}>
+              {view === "holdings" ? (
+                <>
+                  <div ref={boardRef}>
+                    <GaugeStrip
+                      branchCount={map?.lanes.length || 0}
+                      treeCount={liveBayCount(map?.lanes || [], project.rootPath)}
+                      taskCount={project.tasks.length}
+                      artifactCount={holdings?.artifacts.length || 0}
+                      uncheckedCount={uncheckedCount}
+                      taskStats={taskStats}
+                      hygieneCount={(map?.lanes || []).filter((item) => (item.hygiene?.length || 0) > 0).length}
+                      undeclaredCount={(map?.lanes || []).filter((item) => item.undeclared).length}
+                      onOpenForest={() => {
+                        setView("forest");
+                        setTab("task");
+                      }}
+                      onOpenHygiene={() => {
+                        setView("forest");
+                        setFilter("hygiene");
+                      }}
+                      onOpenUndeclared={() => {
+                        setView("forest");
+                        setFilter("undeclared");
+                      }}
+                      onOpenLanes={() => {
+                        setView("lanes");
+                        setTab("task");
+                      }}
+                      onOpenArtifacts={() => {
+                        const first = holdings?.artifacts[0];
+                        if (first) setBrowsePath(first.kind === "dir" ? first.path : first.checkout);
+                        setTab("holdings");
+                      }}
+                    />
+                    <div className="panels">
+                      <HoldingsSource project={project} holdings={holdings} onCopy={copy} />
+                      <ProcessStrip
+                        view={strip}
+                        focus={stripFocus}
+                        onStep={(step) => {
+                          setStripFocus(step);
+                          bumpFocus();
+                          if (step === "repo") {
+                            setTab("holdings");
+                            return;
+                          }
+                          if (step === "branch" || step === "worktree") {
+                            setView("forest");
+                            setTab("task");
+                            return;
+                          }
+                          setTab("holdings");
+                        }}
+                      />
+                    </div>
+                    <OnDutySat
+                      rows={dutyRows}
+                      onOpen={(id) => {
+                        setTaskId(id);
+                        const match = map?.lanes.find((lane) => lane.taskId === id);
+                        if (match) setLaneId(match.id);
+                        setView("lanes");
+                        setTab("task");
+                        bumpFocus();
+                      }}
+                    />
+                  </div>
+                </>
+              ) : view === "forest" ? (
+                forestLanes.length === 0 ? (
+                  <Empty title="还看不到分支" body="登记仓之后，这里会列出每一条分支和每一棵树。" />
+                ) : (
+                  <>
+                  <WorktreeDeck
+                    lanes={forestLanes}
+                    rootPath={project.rootPath}
+                    pinOf={(branch) => (holdings?.versions || []).filter((version) => version.branch === branch).length}
+                    nextOf={(item) => {
+                      const bound = project?.tasks.find((entry) => entry.id === item.taskId);
+                      const row = occupancyRows.find((entry) => entry.taskId === item.taskId);
+                      return loopForLane(item, bound, row, project?.rootPath)?.verb || null;
+                    }}
+                    selectedId={selectedLane?.id}
+                    motionOn={appSettings?.motion !== "off"}
+                    onSelect={(item) => {
+                      setLaneId(item.id);
+                      setTaskId(item.taskId || null);
+                      setBrowsePath(item.worktreePath || "");
+                      setTab("task");
+                      bumpFocus();
+                    }}
+                  />
+                  <ul className="forest" ref={listRef}>
+                    <li className="lane head forest-row" aria-hidden>
+                      <span />
+                      <span>分支</span>
+                      <span>路径</span>
+                      <span>归属</span>
+                      <span>动作</span>
+                    </li>
+                    {groupedForest.map((group) => (
+                      <Fragment key={group.prefix}>
+                        <li className="lane-group">
+                          {group.prefix}/ · {group.lanes.length}
+                        </li>
+                        {group.lanes.map((item, index) => (
+                          <ForestRow
+                            key={item.id}
+                            lane={item}
+                            pinCount={(holdings?.versions || []).filter((version) => version.branch === item.branch).length}
+                            selected={item.id === selectedLane?.id}
+                            index={index}
+                            canDelete={!item.worktreePath && !item.isRemote && item.branch !== project.baseBranch}
+                            confirmDestructive={appSettings?.confirmDestructive !== false}
+                            confirmValue={confirmBranch}
+                            deleting={deleteFor === item.id}
+                            onConfirmValue={setConfirmBranch}
+                            onAskDelete={() => {
+                              setDeleteFor(item.id);
+                              setConfirmBranch("");
+                            }}
+                            onCancelDelete={() => {
+                              setDeleteFor(null);
+                              setConfirmBranch("");
+                            }}
+                            onSelect={() => {
+                              setLaneId(item.id);
+                              setTaskId(item.taskId || null);
+                              setBrowsePath(item.worktreePath || "");
+                              setTab("task");
+                              bumpFocus();
+                            }}
+                            onCopy={copy}
+                            onDelete={() =>
+                              run(async () => {
+                                await api.deleteBranch(project.rootPath, item.branch, false, confirmBranch || item.branch);
+                                setConfirmBranch("");
+                                setDeleteFor(null);
+                                await refresh(project.id, task?.id);
+                              })
+                            }
+                          />
+                        ))}
+                      </Fragment>
+                    ))}
+                  </ul>
+                  </>
+                )
+              ) : visibleTasks.length === 0 ? (
+                <Empty title="还没有任务" body="先建卡：选意图和基线。要独立工作区时再创建 worktree。一条任务一棵树。" />
+              ) : (
+                <ul className="lanes" ref={listRef}>
+                  <li className="lane head" aria-hidden>
+                    <span>功能</span>
+                    <span>分支</span>
+                    <span>路径</span>
+                    <span>状态</span>
+                  </li>
+                  {visibleTasks.map((item, index) => (
+                    <LaneRow
+                      key={item.id}
+                      project={project}
+                      task={item}
+                      occupancy={occupancyRows.find((row) => row.taskId === item.id)}
+                      hygiene={map?.lanes.find((lane) => lane.taskId === item.id)?.hygiene}
+                      selected={item.id === task?.id}
+                      index={index}
+                      onSelect={() => {
+                        setTaskId(item.id);
+                        const match = map?.lanes.find((lane) => lane.taskId === item.id);
+                        if (match) setLaneId(match.id);
+                        setTab("task");
+                        bumpFocus();
+                      }}
+                      onCopy={copy}
+                    />
+                  ))}
+                </ul>
+              )}
+              </div>
+            </>
+          )}
+        </main>
+
+        <aside className="inspector" ref={inspectorRef}>
+          <nav className="tabs">
+            {(["holdings", "task", "charter", "handoff", "blast", "wiki"] as Tab[]).map((item) => (
+              <button
+                key={item}
+                className={tab === item ? "on" : ""}
+                title={TAB_HINT[item]}
+                onClick={() => setTab(item)}
+              >
+                {TAB_LABEL[item]}
+              </button>
+            ))}
+          </nav>
+          <div key={tab} className="pane-shell" ref={paneRef}>
+            {tab === "charter" && project && (
+              <CharterPane
+                project={project}
+                drift={drift}
+                requests={(snap?.requests || []).filter((item) => item.rootPath === project.rootPath)}
+                busy={busy}
+                onSync={() =>
+                  run(async () => {
+                    await api.sync(project.rootPath);
+                    await refresh(project.id, task?.id);
+                  })
+                }
+                onDecide={(id, approve) =>
+                  run(async () => {
+                    await api.decide(project.rootPath, id, approve);
+                    await refresh(project.id, task?.id);
+                  })
+                }
+                onPolicy={(partial) =>
+                  run(async () => {
+                    await api.updatePolicy(project.rootPath, partial);
+                    await refresh(project.id, task?.id);
+                  })
+                }
+              />
+            )}
+            {tab === "holdings" && project && (
+              <HoldingsPane
+                holdings={holdings}
+                lane={selectedLane}
+                focusBranch={stripFocus === "artifact" ? selectedLane?.branch : undefined}
+                ledger={(snap?.ledgerTail || []).find((item) => item.rootPath === project.rootPath)?.lines || []}
+                busy={busy}
+                onCopy={copy}
+                onPin={(name, checkout) =>
+                  run(async () => {
+                    await api.pin(project.rootPath, name, checkout);
+                    await refresh(project.id, task?.id);
+                  })
+                }
+                onUnpin={(id) =>
+                  run(async () => {
+                    await api.unpin(project.rootPath, id);
+                    await refresh(project.id, task?.id);
+                  })
+                }
+                confirmDestructive={appSettings?.confirmDestructive !== false}
+                archiveName={selectedLane?.branch || task?.slug || ""}
+                onArchive={
+                  task?.worktreeId
+                    ? (confirm) =>
+                        run(async () => {
+                          await api.archive(project.rootPath, task.id, confirm);
+                          await refresh(project.id, task.id);
+                        })
+                    : undefined
+                }
+              />
+            )}
+            {tab === "task" && project && (
+              <MapPane
+                project={project}
+                task={task}
+                occupancy={selectedOccupancy}
+                loop={loop}
+                lane={selectedLane}
+                files={files}
+                browsePath={browsePath || selectedLane?.worktreePath || project.rootPath}
+                busy={busy}
+                onCopy={copy}
+                onBrowse={setBrowsePath}
+                pulseFocus={pulseFocus}
+                onFocusPulse={() => setPulseFocus((n) => n + 1)}
+                onLoop={(step) => {
+                  if (step === "pulse") setPulseFocus((n) => n + 1);
+                  if (step === "handoff" || step === "done") {
+                    setTab(step === "done" && loop?.verb === "写进百科" ? "wiki" : "handoff");
+                    return;
+                  }
+                  setTab("task");
+                }}
+                onOpen={
+                  task
+                    ? () =>
+                        run(async () => {
+                          const opened = await api.openTree(project.rootPath, task.id);
+                          await refresh(project.id, task.id);
+                          const recipe = openRecipe(appSettings?.openIn, opened.worktree.path);
+                          copy(`${recipe.label}，下一步登记心跳`, recipe.command);
+                        })
+                    : undefined
+                }
+                onPlant={
+                  selectedLane && !selectedLane.worktreePath
+                    ? () =>
+                        run(async () => {
+                          const planted = await api.plant(project.rootPath, selectedLane.branch);
+                          setBrowsePath(planted.path);
+                          await refresh(project.id, task?.id);
+                          const recipe = openRecipe(appSettings?.openIn, planted.path);
+                          copy(`${recipe.label}，下一步登记心跳`, recipe.command);
+                        })
+                    : undefined
+                }
+                openIn={appSettings?.openIn || "cursor"}
+                onPulse={
+                  task
+                    ? (doing, cite, remainMin) =>
+                        run(async () => {
+                          await api.pulse(project.rootPath, task.id, doing, cite, remainMin);
+                          await refresh(project.id, task.id);
+                          hint("下一步：写交接");
+                        })
+                    : undefined
+                }
+                onClearPulse={
+                  task
+                    ? () =>
+                        run(async () => {
+                          await api.clearPulse(project.rootPath, task.id);
+                          await refresh(project.id, task.id);
+                        })
+                    : undefined
+                }
+              />
+            )}
+            {tab === "handoff" && project && task && (
+              <HandoffPane
+                decisionDraft={decisionDraft}
+                nextDraft={nextDraft}
+                handoffText={handoffText}
+                promptText={promptText}
+                loop={loop}
+                busy={busy}
+                onOpen={
+                  task
+                    ? () =>
+                        run(async () => {
+                          const opened = await api.openTree(project.rootPath, task.id);
+                          await refresh(project.id, task.id);
+                          const recipe = openRecipe(appSettings?.openIn, opened.worktree.path);
+                          copy(`${recipe.label}，下一步登记心跳`, recipe.command);
+                          setTab("task");
+                        })
+                    : undefined
+                }
+                onLoop={(step) => {
+                  if (step === "pulse") setPulseFocus((n) => n + 1);
+                  if (step === "handoff" || step === "done") {
+                    setTab(step === "done" && loop?.verb === "写进百科" ? "wiki" : "handoff");
+                    return;
+                  }
+                  setTab("task");
+                }}
+                onDecision={setDecisionDraft}
+                onNext={setNextDraft}
+                onGenerate={() =>
+                  run(async () => {
+                    const result = await api.handoff(project.rootPath, task.id, decisionDraft, nextDraft);
+                    setHandoffText(result.markdown);
+                    setPromptText(result.prompt);
+                    setBlast(result.blast);
+                    await refresh(project.id, task.id);
+                    hint("下一步：标记完成");
+                  })
+                }
+                onDone={() =>
+                  run(async () => {
+                    await api.done(project.rootPath, task.id);
+                    await refresh(project.id, task.id);
+                    setTab("task");
+                    hint("已完成");
+                  })
+                }
+              />
+            )}
+            {tab === "wiki" && project && (
+              <WikiPane
+                pages={pages}
+                catalog={wikiCatalog}
+                page={wikiPage}
+                lint={lint}
+                query={query}
+                ingestTitle={ingestTitle}
+                ingestBody={ingestBody}
+                busy={busy}
+                searchFocus={wikiFocus}
+                onQuery={setQuery}
+                onTitle={setIngestTitle}
+                onBody={setIngestBody}
+                onCopy={copy}
+                onOpen={(path) =>
+                  run(async () => {
+                    setWikiPage(await api.wikiPage(project.rootPath, path));
+                  })
+                }
+                onFollow={(target) =>
+                  run(async () => {
+                    const hay = wikiCatalog.length ? wikiCatalog : await api.wiki(project.rootPath, "");
+                    if (!wikiCatalog.length) setWikiCatalog(hay);
+                    const match = resolveWikiLink(hay, target);
+                    if (match) {
+                      setWikiPage(await api.wikiPage(project.rootPath, match.path));
+                      if (!pages.some((item) => item.path === match.path)) setQuery("");
+                    } else setQuery(target);
+                  })
+                }
+                onLint={() =>
+                  run(async () => {
+                    setLint(await api.wikiLint(project.rootPath));
+                  })
+                }
+                onIngest={() =>
+                  run(async () => {
+                    if (!ingestTitle.trim() || !ingestBody.trim()) throw new Error("先写标题和原文");
+                    await api.ingest(project.rootPath, ingestTitle.trim(), ingestBody.trim());
+                    setIngestTitle("");
+                    setIngestBody("");
+                    setPages(await api.wiki(project.rootPath, query));
+                    setWikiCatalog(await api.wiki(project.rootPath, ""));
+                  })
+                }
+                onWrite={(bucket) =>
+                  run(async () => {
+                    if (!ingestTitle.trim() || !ingestBody.trim()) throw new Error("先写标题和正文");
+                    await api.wikiWrite(project.rootPath, bucket, ingestTitle.trim(), ingestBody.trim());
+                    setPages(await api.wiki(project.rootPath, query));
+                    setWikiCatalog(await api.wiki(project.rootPath, ""));
+                    setLint(await api.wikiLint(project.rootPath));
+                  })
+                }
+              />
+            )}
+            {tab === "blast" && project && task && (
+              <BlastPane
+                blast={blast}
+                busy={busy}
+                onCheck={() =>
+                  run(async () => {
+                    setBlast(await api.blast(project.rootPath, task.id));
+                  })
+                }
+              />
+            )}
+            {tab === "handoff" && project && !task && <Empty title="先选一条有任务的车道" body="没有任务的分支仍可复制路径；交接跟任务绑定。" />}
+          </div>
+        </aside>
+      </div>
+
+      {error || copied || notice ? (
+        <div className={copied || (notice && !error) ? "toast ok" : "toast"} ref={toastRef}>
+          {copied ? `已复制 ${copied}` : notice || error}
+        </div>
+      ) : null}
+      {settingsOpen ? (
+        <SettingsSheet
+          settings={appSettings}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(partial) =>
+            run(async () => {
+              const next = await api.updateSettings(partial);
+              setAppSettings(next);
+              setSettingsOpen(false);
+            })
+          }
+        />
+      ) : null}
+      {registerOpen ? (
+        <RegisterSheet
+          nameDraft={nameDraft}
+          rootDraft={rootDraft}
+          busy={busy}
+          onName={setNameDraft}
+          onRoot={setRootDraft}
+          onClose={() => setRegisterOpen(false)}
+          onSubmit={() =>
+            run(async () => {
+              if (!rootDraft.trim()) throw new Error("先填仓库最外面那一层的路径");
+              const created = await api.init(rootDraft.trim(), nameDraft.trim() || rootDraft.trim(), groupId);
+              setRegisterOpen(false);
+              await refresh(created.id);
+            })
+          }
+        />
+      ) : null}
+    </div>
+  );
+}
+
+const ForestRow = memo(function ForestRow({
+  lane,
+  selected,
+  index,
+  pinCount,
+  canDelete,
+  confirmDestructive,
+  confirmValue,
+  deleting,
+  onConfirmValue,
+  onAskDelete,
+  onCancelDelete,
+  onSelect,
+  onCopy,
+  onDelete,
+}: {
