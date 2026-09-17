@@ -58,7 +58,8 @@
                     </div>
                   ) : null}
                   <button
-                    type="button" className={composeOpen ? "ghost on" : "ghost"}
+                    type="button"
+                    className={composeOpen ? "ghost on" : "ghost"}
                     onClick={() => {
                       setComposeOpen((value) => !value);
                       setView("lanes");
